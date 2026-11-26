@@ -4,6 +4,7 @@ const themes = {T:['Teknologiforståelse','#065e54'],I:['Ingeniørkunst','#254d8
 const byId = new Map(stops.map(s => [s.id,s]));
 const map = el('map');
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const activeLevel = () => Number(el('level').value);
 const readSaved = () => {try{return JSON.parse(localStorage.getItem('feltkort')||'{}')||{};}catch{return {};}};
 const saved = readSaved();
 const readIds = input => [...new Set(input.map(Number).filter(id=>byId.has(id)))].slice(0,stops.length);
@@ -145,7 +146,10 @@ function draw(){
     node.setAttribute('aria-current',String(selected===s.id));
   });
   for(const [id,node] of markerNodes)if(!display.has(id)){node.remove();markerNodes.delete(id);}
-  el('visible').textContent=pins.length+' stop';
+  const count=view==='route'&&route.length || pins.length===stops.length
+    ? pins.length+' stop'
+    : pins.length+' af '+stops.length+' stop';
+  if(el('visible').textContent!==count)el('visible').textContent=count;
 }
 map.addEventListener('pointerdown',e=>{
   if(e.target!==map||e.button!==0)return;
@@ -168,7 +172,7 @@ map.addEventListener('keydown',e=>{
   if(e.key==='+'||e.key==='-'){e.preventDefault();setZoom(zoom+(e.key==='+'?1:-1));}
 });
 el('plus').onclick=()=>setZoom(zoom+1);el('minus').onclick=()=>setZoom(zoom-1);el('reset').onclick=()=>fit(visiblePoints());
-new ResizeObserver(()=>{if(!mapInitialized&&map.clientWidth){mapInitialized=true;fit(view==='route'&&route.length?route.map(id=>byId.get(id)):stops);}else scheduleDraw();}).observe(map);
+new ResizeObserver(()=>{if(!mapInitialized&&map.clientWidth){mapInitialized=true;fit(visiblePoints());}else scheduleDraw();}).observe(map);
 
 const drawings={
   bil:'M18 82V73L32 61H46L61 42H113L136 65L150 72V91H136 M108 91H59 M32 91H18V82 M46 61H135 M74 43L66 61 M47 91m-11 0a11 11 0 1 0 22 0a11 11 0 1 0 -22 0 M124 91m-11 0a11 11 0 1 0 22 0a11 11 0 1 0 -22 0',
@@ -218,7 +222,7 @@ function illustration(s){
   const url=canvas.toDataURL('image/png');imageCache.set(s.id,url);return url;
 }
 function question(s){
-  return s.questions[Number(el('level').value)];
+  return s.questions[activeLevel()];
 }
 function announce(message){el('status').textContent=message;}
 function speak(s,feedback){
@@ -290,17 +294,22 @@ function openStop(id,pan){
   if(!shown.some(s=>s.id===id)){
     for(const key of ['search','theme','access'])el(key).value='';
   }
-  renderDetail();filter();
+  renderDetail();filter({keepSelected:true});
   el('detail').querySelector('h2').setAttribute('tabindex','-1');
   el('detail').querySelector('h2').focus({preventScroll:true});
   if(matchMedia('(max-width: 760px)').matches)el('detail').scrollIntoView({block:'start'});
 }
-function filter(){
+function filter({keepSelected=false}={}){
   const query=el('search').value.trim().toLocaleLowerCase('da'), theme=el('theme').value, access=el('access').value;
   const free=['Udefra','Gratis inde'];
+  const showAll=el('showAllLevels').checked;
+  const {recommendedStops}=schoolLevels[activeLevel()];
   for(const button of el('legend').querySelectorAll('button'))button.setAttribute('aria-pressed',String(theme===button.dataset.theme));
-  shown=stops.filter(s=>(!theme||s.theme===theme)&&(!query||[s.name,s.place,s.learn,...s.questions,themes[s.theme][0]].join(' ').toLocaleLowerCase('da').includes(query))&&(!access||(access==='free'?free.includes(s.access):access==='inside'?s.access==='Gratis inde':!free.includes(s.access))));
-  if(selected&&!shown.some(s=>s.id===selected)){selected=null;stopSpeaking();renderDetail();}
+  shown=stops.filter(s=>(showAll||recommendedStops.has(s.id))
+    &&(!theme||s.theme===theme)
+    &&(!query||[s.name,s.place,s.learn,...s.questions,themes[s.theme][0]].join(' ').toLocaleLowerCase('da').includes(query))
+    &&(!access||(access==='free'?free.includes(s.access):access==='inside'?s.access==='Gratis inde':!free.includes(s.access))));
+  if(!keepSelected&&selected&&!shown.some(s=>s.id===selected)){selected=null;stopSpeaking();renderDetail();}
   el('results').innerHTML=shown.length?shown.map(s=>'<button class="result" data-stop="'+s.id+'" aria-current="'+(selected===s.id)+'"><span class="stop-number" style="--pin:'+themes[s.theme][1]+'">'+s.id+'</span><span>'+escapeHtml(s.name)+'</span><small>'+s.access+'</small></button>').join('') : '<p>Ingen stop på den søgning. Prøv et andet ord, eller fjern et filter.</p>';
   scheduleDraw();
 }
@@ -315,7 +324,7 @@ function setView(name){
 }
 document.querySelector('nav').addEventListener('click',e=>{const name=e.target.closest('[data-view]')?.dataset.view;if(name){setView(name);if(name==='route'){renderRoute();if(route.length)fit(route.map(id=>byId.get(id)));}el('fieldmap').scrollIntoView();}});
 el('results').addEventListener('click',e=>{const id=Number(e.target.closest('[data-stop]')?.dataset.stop);if(id)openStop(id,true);});
-el('search').addEventListener('input',filter);
+el('search').addEventListener('input',()=>filter());
 for(const id of ['theme','access'])el(id).addEventListener('change',()=>{filter();fit(shown);});
 for(const [key,[name,color]] of Object.entries(themes)){
   el('theme').add(new Option(name,key));
@@ -328,8 +337,23 @@ for(const [key,[name,color]] of Object.entries(themes)){
     setView('explore');filter();fit(shown);
   };
 }
-el('level').onchange=()=>{stopSpeaking();persist();renderDetail();renderPlayer();};
-el('suggestions').innerHTML=walks.map(([name,level,desc,ids,minutes],i)=>'<article class="walk"><div class="meta">'+level+' · '+ids.length+' stop · '+minutes+' min.</div><h3>'+name+'</h3><p>'+desc+'</p><button data-walk="'+i+'">Brug ruten</button></article>').join('');
+function renderSuggestions(){
+  const showAll=el('showAllLevels').checked;
+  el('suggestions').innerHTML=walks.map(([name,levels,desc,ids,minutes],i)=>{
+    if(!showAll&&!levels.includes(activeLevel()))return '';
+    const first=schoolLevels[levels[0]].firstGrade;
+    const last=schoolLevels[levels.at(-1)].lastGrade;
+    return '<article class="walk"><div class="meta">'+first+'.–'+last+'. klasse · '+ids.length+' stop · '+minutes+' min.</div><h3>'+name+'</h3><p>'+desc+'</p><button data-walk="'+i+'">Brug ruten</button></article>';
+  }).join('');
+}
+function updateLevelFilters(){
+  filter();renderSuggestions();fit(visiblePoints());
+}
+el('level').onchange=()=>{
+  el('showAllLevels').checked=false;
+  stopSpeaking();persist();updateLevelFilters();renderDetail();renderPlayer();
+};
+el('showAllLevels').onchange=updateLevelFilters;
 el('suggestions').onclick=e=>{
   const i=e.target.closest('[data-walk]')?.dataset.walk;
   if(i===undefined)return;
@@ -429,7 +453,7 @@ function stepPlayer(index){
   renderPlayer();el('player').scrollIntoView({block:'nearest'});el('play')?.focus({preventScroll:true});
 }
 el('start').onclick=()=>stepPlayer(0);
-filter();renderRoute();fetchPath();
+filter();renderSuggestions();renderRoute();fetchPath();
 if(share.has('r')&&route.length){setView('route');requestAnimationFrame(()=>fit(route.map(id=>byId.get(id))));}
 window.addEventListener('hashchange',()=>{
   const params=new URLSearchParams(location.hash.slice(1));
@@ -437,7 +461,11 @@ window.addEventListener('hashchange',()=>{
   const ids=readIds(params.get('r').split(','));
   if(!ids.length)return;
   const level=params.get('k'), budget=Number(params.get('t')), dwell=Number(params.get('m'));
-  if(['0','1','2'].includes(level))el('level').value=level;
+  if(['0','1','2'].includes(level)){
+    el('level').value=level;
+    el('showAllLevels').checked=false;
+    filter();renderSuggestions();
+  }
   if([45,90,120,150,180].includes(budget))el('budget').value=String(budget);
   if(dwell>=2&&dwell<=45)el('dwell').value=String(dwell);
   changeRoute(ids,nameForRoute(ids));setView('route');fit(ids.map(id=>byId.get(id)));

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Feltarbejde i teknologi, ingeniørkunst og naturvidenskab for elever og undervisere i Aarhus Kommune.">
 <title>Aarhus Feltkort</title>
-<link rel="stylesheet" href="style.css">
-<script src="data.js" defer></script>
-<script src="app.js" defer></script>
+<link rel="stylesheet" href="style.css?v=2">
+<script src="data.js?v=2" defer></script>
+<script src="app.js?v=2" defer></script>
 </head>
 <body>
 <header class="sitebar">
@@ -24,17 +24,20 @@
       <h1 id="intro-title">Feltarbejde i Aarhus</h1>
       <p>Se, hvad trafiklyset reagerer på, hvor regnvandet løber hen, eller hvad en bro hviler på. Find et sted tæt på skolen, eller vælg en temarute.</p>
     </div>
-    <label>Klassetrin
-      <select id="level">
+    <div class="school-controls">
+      <label for="level">Klassetrin</label>
+      <select id="level" aria-describedby="levelHelp">
         <option value="0">Indskoling, 0.–3. klasse</option>
         <option value="1" selected>Mellemtrin, 4.–6. klasse</option>
         <option value="2">Udskoling, 7.–9. klasse</option>
       </select>
-    </label>
+      <label class="show-all"><input type="checkbox" id="showAllLevels"> Vis alle stop og temaruter</label>
+      <p id="levelHelp">Klassetrinnet styrer også opgaven ved hvert stop.</p>
+    </div>
   </section>
   <div class="layout">
     <section class="mapwrap" aria-label="Kort over Aarhus">
-      <div class="maptop"><strong>Kort over Aarhus</strong><span id="visible"></span></div>
+      <div class="maptop"><strong>Kort over Aarhus</strong><span id="visible" role="status"></span></div>
       <div id="map" tabindex="0" aria-label="Kort. Brug piletasterne til at flytte kortet og plus og minus til at zoome. Alle stop kan også vælges i listen.">
         <canvas id="coast" aria-hidden="true"></canvas>
         <div id="tiles" aria-hidden="true"></div>
@@ -95,7 +98,7 @@
   </div>
   <details class="teacher">
     <summary>Planlæg turen med klassen</summary>
-    <p>Vælg klassetrin, så eleverne får en opgave, der passer til dem. Tjek åbningstider og den præcise indgang hos besøgsstedet. Gangtiden på kortet starter ved første stop og slutter ved det sidste. Regn transporten til og fra skolen med.</p>
+    <p>Vælg klassetrin for at se anbefalede stop og temaruter og få en opgave til elevernes trin. Tjek åbningstider og den præcise indgang hos besøgsstedet. Gangtiden på kortet starter ved første stop og slutter ved det sidste. Regn transporten til og fra skolen med.</p>
     <p>Ved hvert stop kan eleverne læse eller lytte, finde en detalje på stedet og forklare, hvad den gør. Oplæsning bruger enhedens danske stemme. Gem evt. en skitse som grundlag for opsamling i klassen.</p>
     <p>Ruten gemmes i den browser, I bruger. Rutelinket indeholder stoprækkefølge, klassetrin og tidsramme. Modtagerne skal have adgang til feltkortet.</p>
   </details>

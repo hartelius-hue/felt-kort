@@ -56,13 +56,31 @@ const stops = [
   [55,"Mejlgade: Trafiklys ved Nørreport",56.16173,10.21266,"T","Fortovet ved krydset Mejlgade og Nørreport","Udefra","Ved Mejlgades kryds med Nørreport bruger kommunen kameraer og software til at registrere trafik og tilpasse signalerne for cyklister og fodgængere. Fra fortovet kan I holde øje med, hvem der får grønt hvornår.",["Find signalet til cykler og signalet til fodgængere. Viser de grønt samtidig?","Hvem skal vente, når en anden får grønt? Notér rækkefølgen for mindst to skift.","Sammenlign trafikgruppernes ventetid over flere signalomløb. Hvordan vil I afgøre, om en ændring i signalet gør krydset bedre for nogen og dårligere for andre?"],"signal","https://aarhus.dk/demokrati/politikker-og-planer/trafik-mobilitet-og-infrastruktur/intelligente-transport-systemer"]
 ].map(([id,name,lat,lon,theme,place,access,learn,questions,icon,source]) => ({id,name,lat,lon,theme,place,access,learn,questions,icon,source}));
 
+const schoolLevels = [
+  {
+    firstGrade: 0, lastGrade: 3,
+    // Steder med synlige dele, bevægelse eller noget at finde og sammenligne.
+    recommendedStops: new Set([1,2,3,5,6,7,8,9,10,11,13,14,15,20,22,23,24,25,28,29,31,33,34,42,43,46,49,50,52,53])
+  },
+  {
+    firstGrade: 4, lastGrade: 6,
+    // Steder til skitser, sammenligninger og undersøgelser af enkle systemer.
+    recommendedStops: new Set([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,19,20,21,22,23,24,25,28,29,30,31,32,33,34,35,36,38,42,43,44,45,46,47,48,49,50,51,52,53,55])
+  },
+  {
+    firstGrade: 7, lastGrade: 9,
+    // Steder til undersøgelser af data, designvalg, energi og sammenhænge.
+    recommendedStops: new Set([1,2,3,4,5,6,7,9,10,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55])
+  }
+];
+
 const walks = [
-  ["Havnens maskiner","0.–6. klasse","Følg vandet ved slusen, og se, hvordan bil, bog og letbane kommer videre.",[3,1,2,13,22],90],
-  ["Broer, tårn og glasgulv","4.–9. klasse","Kig efter, hvad der bærer en bro, et tårn og en platform over gågaden.",[7,21,19,14,20],90],
-  ["Regnvand, havvand og varme","4.–9. klasse","Følg åen mod havnen, og se, hvad byen bruger havnevandet til.",[20,2,22,5,4],90],
-  ["Lys og lyd i midtbyen","4.–9. klasse","Se byen gennem farvet glas, og lyt efter efterklang. Tjek billet og adgang til salene på forhånd.",[50,14,15,16,17],150],
-  ["På tværs af Universitetsparken","4.–9. klasse","Find et måleinstrument på Steno, sammenlign dyr på museet, og se, hvordan bygningerne følger terrænet.",[49,45,44,43,46],150],
-  ["Fra Havnebadet til Træskibshavnen","0.–9. klasse","Se på badeanlæg, boliger og træskibe. Sæt ekstra tid af, hvis I vil op i Lighthouse.",[6,5,24,23,25],120],
-  ["Hverdagens automatiske systemer","4.–9. klasse","Undersøg, hvad en parkeringsautomat, en bogautomat og et trafiklys skal kunne registrere. Se også, hvem et hjælpemiddel er lavet til. Book DokkX, før I tager af sted.",[1,13,51,55],90],
-  ["Teknologi omkring Viby Torv","0.–9. klasse","Sammenlign en kortlæser med et trafiklys. Hvad skal de hver især vide for at reagere?",[53,52],45]
+  ["Havnens maskiner",[0,1],"Følg vandet ved slusen, og se, hvordan bil, bog og letbane kommer videre.",[3,1,2,13,22],90],
+  ["Broer, tårn og glasgulv",[1,2],"Kig efter, hvad der bærer en bro, et tårn og en platform over gågaden.",[7,21,19,14,20],90],
+  ["Regnvand, havvand og varme",[1,2],"Følg åen mod havnen, og se, hvad byen bruger havnevandet til.",[20,2,22,5,4],90],
+  ["Lys og lyd i midtbyen",[1,2],"Se byen gennem farvet glas, og lyt efter efterklang. Tjek billet og adgang til salene på forhånd.",[50,14,15,16,17],150],
+  ["På tværs af Universitetsparken",[1,2],"Find et måleinstrument på Steno, sammenlign dyr på museet, og se, hvordan bygningerne følger terrænet.",[49,45,44,43,46],150],
+  ["Fra Havnebadet til Træskibshavnen",[0,1,2],"Se på badeanlæg, boliger og træskibe. Sæt ekstra tid af, hvis I vil op i Lighthouse.",[6,5,24,23,25],120],
+  ["Hverdagens automatiske systemer",[1,2],"Undersøg, hvad en parkeringsautomat, en bogautomat og et trafiklys skal kunne registrere. Se også, hvem et hjælpemiddel er lavet til. Book DokkX, før I tager af sted.",[1,13,51,55],90],
+  ["Teknologi omkring Viby Torv",[0,1,2],"Sammenlign en kortlæser med et trafiklys. Hvad skal de hver især vide for at reagere?",[53,52],45]
 ];
