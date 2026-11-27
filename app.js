@@ -13,15 +13,22 @@ let route = readIds(share.has('r') ? share.get('r').split(',') : Array.isArray(s
 function nameForRoute(ids){
   return walks.find(([, , , walk]) => walk.join(',')===ids.join(','))?.[0] ?? 'Min rute';
 }
-let routeName = share.has('r') ? nameForRoute(route) : (typeof saved.name==='string' ? saved.name : 'Min rute');
-let selected = null, view = 'explore', player = -1, path = null, routeVersion = 0;
+const sharedRouteName = (params,ids) => params.get('n')?.trim().slice(0,100) || nameForRoute(ids);
+let routeName = share.has('r') ? sharedRouteName(share,route) : (typeof saved.name==='string' ? saved.name : 'Min rute');
+let selected = null, view = 'explore', player = -1, path, routeVersion = 0;
+let draft = null, planVersion = 0;
 let zoom = 13, center = [56.158,10.209], shown = stops, drag, drawFrame;
 let mapInitialized = false;
 if (['0','1','2'].includes(share.get('k') ?? saved.level)) el('level').value=share.get('k') ?? saved.level;
-if ([45,90,120,150,180].includes(Number(share.get('t') ?? saved.budget))) el('budget').value=share.get('t') ?? saved.budget;
-if (Number(share.get('m') ?? saved.dwell) >= 2 && Number(share.get('m') ?? saved.dwell) <= 45) el('dwell').value=share.get('m') ?? saved.dwell;
+function setTiming(budget,dwell){
+  if(Number.isInteger(+budget)&&+budget>=15&&+budget<=360)el('budget').value=+budget;
+  if(Number.isInteger(+dwell)&&+dwell>=2&&+dwell<=45)el('dwell').value=+dwell;
+}
+setTiming(share.get('t') ?? saved.budget, share.get('m') ?? saved.dwell);
 function routeParams(){
-  return new URLSearchParams({r:route.join(','),k:el('level').value,t:el('budget').value,m:el('dwell').value});
+  const params=new URLSearchParams({r:route.join(','),k:el('level').value,t:el('budget').value,m:el('dwell').value});
+  if(routeName!==nameForRoute(route))params.set('n',routeName);
+  return params;
 }
 function persist(){
   if(new URLSearchParams(location.hash.slice(1)).has('r')){
@@ -39,14 +46,17 @@ function geography(x,y,z=zoom){
   const size=256*2**z;
   return [Math.atan(Math.sinh(Math.PI*(1-2*y/size)))*180/Math.PI,x/size*360-180];
 }
-function fit(points){
-  if(!points.length)return;
+function mapViewport(points,width,height,margin=90){
   const coords=points.map(p=>world(p.lat,p.lon,0));
   const xs=coords.map(p=>p[0]), ys=coords.map(p=>p[1]);
   const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
-  const scale=Math.min(Math.max(100,map.clientWidth-90)/Math.max(right-left,.0001),Math.max(100,map.clientHeight-90)/Math.max(bottom-top,.0001));
-  zoom=Math.min(17,Math.max(10,Math.floor(Math.log2(scale))));
-  center=geography((left+right)/2,(top+bottom)/2,0);
+  const scale=Math.min(Math.max(100,width-margin)/Math.max(right-left,.0001),Math.max(100,height-margin)/Math.max(bottom-top,.0001));
+  return {zoom:Math.min(17,Math.max(10,Math.floor(Math.log2(scale)))),center:geography((left+right)/2,(top+bottom)/2,0)};
+}
+function fit(points, geometry){
+  if(!points.length)return;
+  const extent=geometry ? [...points,...geometry.map(([lon,lat])=>({lat,lon}))] : points;
+  ({zoom,center}=mapViewport(extent,map.clientWidth,map.clientHeight));
   scheduleDraw();
 }
 function move(dx,dy){
@@ -69,8 +79,13 @@ function scheduleDraw(){
   drawFrame=requestAnimationFrame(draw);
 }
 const markerNodes=new Map(), tileNodes=new Map();
+function mappedWalk(){
+  if(view==='plan')return draft;
+  if(view==='route'&&route.length)return {points:route.map(id=>byId.get(id)),path};
+  return null;
+}
 function visiblePoints(){
-  return view==='route'&&route.length?route.map(id=>byId.get(id)):shown;
+  return mappedWalk()?.points ?? shown;
 }
 function updateTileStatus(){
   const tiles=[...tileNodes.values()];
@@ -79,6 +94,21 @@ function updateTileStatus(){
   if(unavailable)el('tileStatus').textContent='Baggrundskortet kunne ikke hentes. I kan stadig vælge stop på kortet og i listen.';
 }
 const coastline=[[56.279,10.32],[56.243,10.31],[56.219,10.27],[56.194,10.248],[56.175,10.236],[56.165,10.22],[56.16,10.215],[56.154,10.219],[56.15,10.227],[56.139,10.224],[56.119,10.233],[56.092,10.256],[56.06,10.273],[56.02,10.30]];
+function drawCoast(bg,width,height,pos){
+  bg.fillStyle='#d5e9ef';bg.fillRect(0,0,width,height);
+  bg.fillStyle='#edf2e6';bg.beginPath();bg.moveTo(-2,-100000);
+  for(const [lat,lon] of coastline)bg.lineTo(...pos(lat,lon));
+  bg.lineTo(-2,100000);bg.closePath();bg.fill();
+}
+function drawRouteLine(ctx,coords,pos,streetPath,lineWidth=4){
+  if(coords.length<2)return;
+  ctx.save();ctx.beginPath();
+  coords.forEach(([lon,lat],i)=>{const point=pos(lat,lon);i===0?ctx.moveTo(...point):ctx.lineTo(...point);});
+  ctx.lineCap='round';ctx.lineJoin='round';
+  if(!streetPath)ctx.setLineDash([6,6]);
+  ctx.lineWidth=lineWidth+3;ctx.strokeStyle='#fff';ctx.stroke();
+  ctx.lineWidth=lineWidth;ctx.strokeStyle='#a44012';ctx.stroke();ctx.restore();
+}
 function draw(){
   const w=map.clientWidth,h=map.clientHeight;
   if(!w||!h)return;
@@ -108,18 +138,9 @@ function draw(){
   const base=el('coast');base.width=w*ratio;base.height=h*ratio;
   base.style.width=w+'px';base.style.height=h+'px';
   const bg=base.getContext('2d');bg.scale(ratio,ratio);
-  bg.fillStyle='#d5e9ef';bg.fillRect(0,0,w,h);
-  bg.fillStyle='#edf2e6';bg.beginPath();bg.moveTo(-2,-100000);
-  for(const [lat,lon] of coastline)bg.lineTo(...pos(lat,lon));
-  bg.lineTo(-2,100000);bg.closePath();bg.fill();
-  const coords=path?.geometry ?? route.map(id=>{const s=byId.get(id);return [s.lon,s.lat];});
-  if(coords.length>1){
-    ctx.beginPath();coords.forEach(([lon,lat],i)=>{const point=pos(lat,lon);i===0?ctx.moveTo(...point):ctx.lineTo(...point);});
-    ctx.lineCap='round';ctx.lineJoin='round';
-    if(!path)ctx.setLineDash([6,6]);
-    ctx.lineWidth=7;ctx.strokeStyle='#fff';ctx.stroke();ctx.lineWidth=4;ctx.strokeStyle='#a44012';ctx.stroke();
-  }
-  const pins=visiblePoints();
+  drawCoast(bg,w,h,pos);
+  const walk=mappedWalk(), pins=walk?.points ?? shown;
+  if(walk)drawRouteLine(ctx,walk.path?.geometry ?? pins.map(s=>[s.lon,s.lat]),pos,walk.path);
   const display=new Set(), groups=new Map();
   for(const s of pins){
     const [x,y]=pos(s.lat,s.lon);
@@ -140,13 +161,14 @@ function draw(){
     const a=i*2*Math.PI/group.length, offset=group.length>1?Math.min(35,8+group.length*4):0;
     node.style.left=Math.max(16,Math.min(w-16,x+Math.cos(a)*offset))+'px';
     node.style.top=Math.max(16,Math.min(h-24,y+Math.sin(a)*offset))+'px';
-    node.textContent=view==='route'&&route.length?route.indexOf(s.id)+1:s.id;
-    node.setAttribute('aria-label',(view==='route'&&route.length?'Rutestop '+(route.indexOf(s.id)+1):s.id)+'. '+s.name);
-    node.classList.toggle('in-route',route.includes(s.id));
+    const number=walk?pins.indexOf(s)+1:s.id;
+    node.textContent=number;
+    node.setAttribute('aria-label',(walk?'Rutestop ':'')+number+'. '+s.name);
+    node.classList.toggle('in-route',Boolean(walk)||route.includes(s.id));
     node.setAttribute('aria-current',String(selected===s.id));
   });
   for(const [id,node] of markerNodes)if(!display.has(id)){node.remove();markerNodes.delete(id);}
-  const count=view==='route'&&route.length || pins.length===stops.length
+  const count=walk || pins.length===stops.length
     ? pins.length+' stop'
     : pins.length+' af '+stops.length+' stop';
   if(el('visible').textContent!==count)el('visible').textContent=count;
@@ -171,8 +193,9 @@ map.addEventListener('keydown',e=>{
   if(e.key in dirs){e.preventDefault();move(...dirs[e.key]);}
   if(e.key==='+'||e.key==='-'){e.preventDefault();setZoom(zoom+(e.key==='+'?1:-1));}
 });
-el('plus').onclick=()=>setZoom(zoom+1);el('minus').onclick=()=>setZoom(zoom-1);el('reset').onclick=()=>fit(visiblePoints());
-new ResizeObserver(()=>{if(!mapInitialized&&map.clientWidth){mapInitialized=true;fit(visiblePoints());}else scheduleDraw();}).observe(map);
+function fitVisible(){fit(visiblePoints(),mappedWalk()?.path?.geometry);}
+el('plus').onclick=()=>setZoom(zoom+1);el('minus').onclick=()=>setZoom(zoom-1);el('reset').onclick=fitVisible;
+new ResizeObserver(()=>{if(!mapInitialized&&map.clientWidth){mapInitialized=true;fitVisible();}else scheduleDraw();}).observe(map);
 
 const drawings={
   bil:'M18 82V73L32 61H46L61 42H113L136 65L150 72V91H136 M108 91H59 M32 91H18V82 M46 61H135 M74 43L66 61 M47 91m-11 0a11 11 0 1 0 22 0a11 11 0 1 0 -22 0 M124 91m-11 0a11 11 0 1 0 22 0a11 11 0 1 0 -22 0',
@@ -301,7 +324,7 @@ function openStop(id,pan){
 }
 function filter({keepSelected=false}={}){
   const query=el('search').value.trim().toLocaleLowerCase('da'), theme=el('theme').value, access=el('access').value;
-  const free=['Udefra','Gratis inde'];
+  const free=freeAccess;
   const showAll=el('showAllLevels').checked;
   const {recommendedStops}=schoolLevels[activeLevel()];
   for(const button of el('legend').querySelectorAll('button'))button.setAttribute('aria-pressed',String(theme===button.dataset.theme));
@@ -322,12 +345,19 @@ function setView(name){
   }
   el('pane').scrollTop=0;scheduleDraw();
 }
-document.querySelector('nav').addEventListener('click',e=>{const name=e.target.closest('[data-view]')?.dataset.view;if(name){setView(name);if(name==='route'){renderRoute();if(route.length)fit(route.map(id=>byId.get(id)));}el('fieldmap').scrollIntoView();}});
+document.querySelector('nav').addEventListener('click',e=>{
+  const name=e.target.closest('[data-view]')?.dataset.view;
+  if(!name)return;
+  setView(name);
+  if(name==='route')renderRoute();
+  fitVisible();el('fieldmap').scrollIntoView();
+});
 el('results').addEventListener('click',e=>{const id=Number(e.target.closest('[data-stop]')?.dataset.stop);if(id)openStop(id,true);});
 el('search').addEventListener('input',()=>filter());
 for(const id of ['theme','access'])el(id).addEventListener('change',()=>{filter();fit(shown);});
 for(const [key,[name,color]] of Object.entries(themes)){
   el('theme').add(new Option(name,key));
+  el('planTheme').add(new Option(name,key));
   const badge=document.createElement('button');
   badge.type='button';badge.dataset.theme=key;badge.textContent=name;
   badge.style.setProperty('--pin',color);el('legend').append(badge);
@@ -343,11 +373,11 @@ function renderSuggestions(){
     if(!showAll&&!levels.includes(activeLevel()))return '';
     const first=schoolLevels[levels[0]].firstGrade;
     const last=schoolLevels[levels.at(-1)].lastGrade;
-    return '<article class="walk"><div class="meta">'+first+'.–'+last+'. klasse · '+ids.length+' stop · '+minutes+' min.</div><h3>'+name+'</h3><p>'+desc+'</p><button data-walk="'+i+'">Brug ruten</button></article>';
+    return '<article class="walk"><div class="meta">'+first+'.–'+last+'. klasse · '+ids.length+' stop · '+minutes+' min. afsat</div><h3>'+name+'</h3><p>'+desc+'</p><div class="actions"><button data-walk="'+i+'">Brug ruten</button><button data-sheet="'+i+'">Se feltark</button></div></article>';
   }).join('');
 }
 function updateLevelFilters(){
-  filter();renderSuggestions();fit(visiblePoints());
+  filter();renderSuggestions();updatePlannerChoices();fitVisible();
 }
 el('level').onchange=()=>{
   el('showAllLevels').checked=false;
@@ -355,20 +385,109 @@ el('level').onchange=()=>{
 };
 el('showAllLevels').onchange=updateLevelFilters;
 el('suggestions').onclick=e=>{
-  const i=e.target.closest('[data-walk]')?.dataset.walk;
+  const button=e.target.closest('button');
+  if(!button)return;
+  const i=button.dataset.walk??button.dataset.sheet;
   if(i===undefined)return;
+  const [name,,desc,ids,minutes]=walks[Number(i)];
+  if(button.hasAttribute('data-sheet')){
+    showFieldSheet(name,ids.map(id=>byId.get(id)),8,undefined,desc);return;
+  }
   if(route.length&&!confirm('Vil du erstatte den nuværende rute med temaruten?'))return;
-  const [name,,,ids,minutes]=walks[Number(i)];
-  el('budget').value=String(minutes);changeRoute([...ids],name);setView('route');fit(route.map(id=>byId.get(id)));
+  el('budget').value=String(minutes);changeRoute([...ids],name);setView('route');fitVisible();
 };
-function distance(a,b){
-  const rad=Math.PI/180, half=(b.lat-a.lat)*rad/2, side=(b.lon-a.lon)*rad/2;
-  const h=Math.sin(half)**2+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(side)**2;
-  return 12742*Math.asin(Math.sqrt(h));
+
+function plannerStops(){
+  const theme=el('planTheme').value, onlyFree=el('planFree').checked;
+  const {recommendedStops}=schoolLevels[activeLevel()];
+  return stops.filter(s=>(el('showAllLevels').checked||recommendedStops.has(s.id))
+    &&(!theme||s.theme===theme)&&(!onlyFree||freeAccess.includes(s.access)));
 }
-function changeRoute(next,name='Min rute'){
-  stopSpeaking();route=next;routeName=name;player=-1;path=null;announce('');
-  persist();renderDetail();renderRoute();scheduleDraw();fetchPath();
+function invalidateDraft(){
+  ++planVersion;draft=null;
+  el('planResult').hidden=true;el('generateWalk').disabled=false;
+  el('planStatus').textContent='';
+  if(view==='plan')fitVisible();
+}
+function updatePlannerChoices(){
+  const select=el('planStart'), previous=select.value;
+  select.options.length=1;
+  const available=plannerStops().sort((a,b)=>a.name.localeCompare(b.name,'da'));
+  for(const s of available)select.add(new Option(s.name,String(s.id)));
+  if(available.some(s=>String(s.id)===previous))select.value=previous;
+  invalidateDraft();
+}
+function showDraft(points,streetPath,budget,dwell){
+  const name='Fra '+points[0].name+' til '+points.at(-1).name;
+  draft={name,points,path:streetPath,budget,dwell};
+  el('planResultTitle').textContent=name;
+  el('planStats').innerHTML=statsMarkup(points,streetPath,dwell);
+  el('planRows').innerHTML=routeList(points);
+  el('planResult').hidden=false;
+  if(view==='plan')fitVisible();
+}
+async function generateWalk(event){
+  event.preventDefault();
+  invalidateDraft();
+  const version=planVersion;
+  const status=el('planStatus');
+  const budget=Number(el('planMinutes').value), count=Number(el('planCount').value);
+  const dwell=Number(el('planDwell').value), start=Number(el('planStart').value);
+  const distanceValue=Number(el('planDistance').value), stepsUnit=el('planUnit').value==='steps';
+  const distanceKm=distanceValue ? distanceValue*(stepsUnit ? stepLength/1000 : 1) : Infinity;
+  const maxKm=Math.min(distanceKm,(budget-count*dwell)*walkingSpeed/60);
+  const points=plannerStops();
+  if(count>points.length){status.textContent='Der er kun '+points.length+' stop med de valgte filtre. Vælg færre stop, eller giv plads til flere temaer eller adgangstyper.';return;}
+  if(maxKm<=0){status.textContent='Opholdene bruger hele tiden. Sæt færre minutter af pr. stop, eller giv turen mere tid.';return;}
+
+  const options=walkingCandidates(points,start,count,maxKm);
+  if(!options.length){status.textContent='Ingen af de foreslåede ruter passer til rammen. Prøv færre stop, mere tid eller et andet startsted.';return;}
+  el('generateWalk').disabled=true;
+  status.textContent='Finder stop og tjekker gangvejen …';
+  for(const option of options){
+    const result=await requestFootpath(option.points);
+    if(version!==planVersion)return;
+    if(result?.km<=maxKm+1e-9&&walkNumbers(option.points,result,dwell).total<=budget){
+      showDraft(option.points,result,budget,dwell);
+      status.textContent='Forslaget passer til jeres tid og afstand.';
+      break;
+    }
+    if(result===undefined){
+      const estimated=options.find(candidate=>candidate.km<=maxKm+1e-9&&walkNumbers(candidate.points,null,dwell).total<=budget);
+      if(estimated)showDraft(estimated.points,null,budget,dwell);
+      status.textContent='Gangvejen kunne ikke hentes. '+(draft?'Forslaget er et skøn ud fra luftlinje. Tjek vejen, før I går.':'Prøv igen om lidt.');
+      break;
+    }
+    status.textContent='De beregnede gangruter passede ikke til rammen. Prøv mere tid, en længere afstand eller færre stop.';
+  }
+  el('generateWalk').disabled=false;
+}
+el('plannerForm').onsubmit=generateWalk;
+el('plannerForm').addEventListener('change',e=>{
+  if(e.target.id==='planTheme'||e.target.id==='planFree'){updatePlannerChoices();return;}
+  if(e.target.id==='planUnit'){
+    const field=el('planDistance'), steps=el('planUnit').value==='steps';
+    field.min=steps?'1':'0.1';field.max=steps?'34000':'22';field.step=steps?'1':'any';
+  }
+  invalidateDraft();
+});
+el('usePlan').onclick=()=>{
+  if(!draft||(route.length&&!confirm('Vil du erstatte din nuværende rute med dette forslag?')))return;
+  setTiming(draft.budget,draft.dwell);
+  setView('route');changeRoute(draft.points.map(s=>s.id),draft.name,draft.path??undefined);fitVisible();
+};
+el('printPlan').onclick=()=>{
+  if(draft)showFieldSheet(draft.name,draft.points,draft.dwell,draft.path);
+};
+function showRouteMap(){
+  fitVisible();map.scrollIntoView({block:'start'});map.focus({preventScroll:true});
+}
+el('viewPlanMap').onclick=showRouteMap;
+function changeRoute(next,name='Min rute',knownPath){
+  stopSpeaking();route=next;routeName=name;player=-1;path=knownPath;announce('');
+  ++routeVersion;
+  persist();renderDetail();renderRoute();scheduleDraw();
+  if(path===undefined)fetchPath();
 }
 function renderRoute(updateRows=true){
   el('count').textContent=route.length;
@@ -379,14 +498,12 @@ function renderRoute(updateRows=true){
     el('routeRows').innerHTML='';renderPlayer();return;
   }
   const points=route.map(id=>byId.get(id));
-  const estimated=points.slice(1).reduce((sum,p,i)=>sum+distance(points[i],p),0)*1.4;
-  const km=path?.km ?? estimated, minutes=Math.ceil(km/3.5*60);
-  const total=minutes+route.length*Number(el('dwell').value||8), budget=Number(el('budget').value);
-  const format=new Intl.NumberFormat('da-DK',{maximumFractionDigits:1});
-  const timing=route.length>1?'Ca. '+format.format(km)+' km og '+minutes+' min. gang. ':'';
-  const basis=route.length<2?'':path?' Gangtiden er regnet ved 3,5 km/t.':' Afstanden er skønnet ud fra luftlinje. Den stiplede linje viser kun stoprækkefølgen.';
-  el('routeSummary').textContent=timing+'Med ophold ved '+route.length+' stop tager turen ca. '+total+' min. '+
-    (total>budget?'Det er mere end de '+budget+' min., I har sat af.':'Det kan være inden for de '+budget+' min., I har sat af.')+basis;
+  const dwell=Number(el('dwell').value||8), budget=Number(el('budget').value);
+  const {total}=walkNumbers(points,path,dwell);
+  const basis=route.length<2||path?'':path===undefined?' Henter gangvejen, hvis den er tilgængelig.':
+    ' Afstanden er et skøn. Den stiplede linje viser stoprækkefølgen.';
+  el('routeSummary').innerHTML=statsMarkup(points,path,dwell)+'<p>'+
+    (total>budget?'Turen tager mere end de '+budget+' min., I har sat af.':'Turen kan være inden for de '+budget+' min., I har sat af.')+basis+'</p>';
   if(!updateRows)return;
   el('routeRows').innerHTML=points.map((s,i)=>{
     const walk=i?'<a class="meta" href="'+walkingLink(points[i-1],s)+'" target="_blank" rel="noopener">Gangvej fra forrige stop</a>':'';
@@ -394,22 +511,14 @@ function renderRoute(updateRows=true){
   }).join('');
   renderPlayer();
 }
-let pathController;
 async function fetchPath(){
-  pathController?.abort();
-  const version=++routeVersion;
-  if(route.length<2||route.length>12)return;
-  const coords=route.map(id=>{const s=byId.get(id);return s.lon+','+s.lat;}).join(';');
-  const controller=new AbortController();
-  pathController=controller;
-  const timeout=setTimeout(()=>controller.abort(),8000);
-  try{
-    const response=await fetch('https://routing.openstreetmap.de/routed-foot/route/v1/driving/'+coords+'?overview=full&geometries=geojson&steps=false',{signal:controller.signal});
-    if(!response.ok)return;
-    const result=(await response.json()).routes?.[0];
-    if(version!==routeVersion||!Array.isArray(result?.geometry?.coordinates)||!Number.isFinite(result.distance))return;
-    path={geometry:result.geometry.coordinates,km:result.distance/1000};renderRoute(false);scheduleDraw();
-  }catch{}finally{clearTimeout(timeout);}
+  if(route.length<2)return;
+  const version=routeVersion;
+  const found=await requestFootpath(route.map(id=>byId.get(id)));
+  if(version!==routeVersion)return;
+  path=found??null;
+  renderRoute(false);
+  if(view==='route'&&path)fitVisible();else scheduleDraw();
 }
 el('routeRows').onclick=e=>{
   const button=e.target.closest('button');
@@ -425,9 +534,12 @@ el('routeRows').onclick=e=>{
   }
 };
 for(const id of ['budget','dwell'])el(id).onchange=()=>{
-  el('dwell').value=String(Math.min(45,Math.max(2,Number(el('dwell').value)||8)));persist();renderRoute();
+  const input=el(id), fallback=id==='budget'?90:8;
+  input.value=Math.min(+input.max,Math.max(+input.min,Math.round(+input.value||fallback)));
+  persist();renderRoute();
 };
-el('fit').onclick=()=>fit(route.map(id=>byId.get(id)));
+el('fit').onclick=showRouteMap;
+el('printRoute').onclick=()=>showFieldSheet(routeName,route.map(id=>byId.get(id)),Number(el('dwell').value||8),path);
 el('clear').onclick=()=>{if(confirm('Vil du fjerne alle stop fra ruten?')){changeRoute([]);announce('Ruten er tømt.');}};
 el('copy').onclick=async()=>{
   const link=new URL(location.href);
@@ -453,8 +565,9 @@ function stepPlayer(index){
   renderPlayer();el('player').scrollIntoView({block:'nearest'});el('play')?.focus({preventScroll:true});
 }
 el('start').onclick=()=>stepPlayer(0);
-filter();renderSuggestions();renderRoute();fetchPath();
-if(share.has('r')&&route.length){setView('route');requestAnimationFrame(()=>fit(route.map(id=>byId.get(id))));}
+bindFieldSheet();
+filter();renderSuggestions();updatePlannerChoices();renderRoute();fetchPath();
+if(share.has('r')&&route.length){setView('route');requestAnimationFrame(fitVisible);}
 window.addEventListener('hashchange',()=>{
   const params=new URLSearchParams(location.hash.slice(1));
   if(!params.has('r'))return;
@@ -464,9 +577,8 @@ window.addEventListener('hashchange',()=>{
   if(['0','1','2'].includes(level)){
     el('level').value=level;
     el('showAllLevels').checked=false;
-    filter();renderSuggestions();
+    filter();renderSuggestions();updatePlannerChoices();
   }
-  if([45,90,120,150,180].includes(budget))el('budget').value=String(budget);
-  if(dwell>=2&&dwell<=45)el('dwell').value=String(dwell);
-  changeRoute(ids,nameForRoute(ids));setView('route');fit(ids.map(id=>byId.get(id)));
+  setTiming(budget,dwell);
+  changeRoute(ids,sharedRouteName(params,ids));setView('route');fitVisible();
 });

@@ -5,15 +5,18 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Feltarbejde i teknologi, ingeniørkunst og naturvidenskab for elever og undervisere i Aarhus Kommune.">
 <title>Aarhus Feltkort</title>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 <script src="data.js?v=2" defer></script>
-<script src="app.js?v=2" defer></script>
+<script src="walking.js" defer></script>
+<script src="field-sheet.js" defer></script>
+<script src="app.js?v=3" defer></script>
 </head>
 <body>
 <header class="sitebar">
   <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">⌖</span><span>Aarhus <b>Feltkort</b></span></a>
   <nav aria-label="Hovedmenu">
     <button type="button" data-view="explore" aria-pressed="true">Kortet</button>
+    <button type="button" data-view="plan" aria-pressed="false">Planlæg en walk</button>
     <button type="button" data-view="walks" aria-pressed="false">Temaruter</button>
     <button type="button" data-view="route" aria-pressed="false">Min rute <b id="count">0</b></button>
   </nav>
@@ -50,7 +53,7 @@
         </div>
         <div class="orientation" aria-hidden="true"><span>▲</span> N</div>
         <div id="tileStatus" class="map-message" role="status" hidden></div>
-        <div class="attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-bidragsydere</a></div>
+        <div class="attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-bidragsydere</a> · <a id="editMap" href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">Ret kortet</a></div>
       </div>
       <div class="legend" id="legend" aria-label="Filtrér kortet efter emne"></div>
     </section>
@@ -72,21 +75,65 @@
         <div id="detail" hidden></div>
         <div id="results"></div>
       </section>
+      <section id="plan" hidden aria-labelledby="planTitle">
+        <h2 id="planTitle">Planlæg en walk</h2>
+        <p class="muted">Vælg, hvor længe I vil være af sted, og hvor mange steder I vil undersøge. Feltkortet finder en rute mellem stoppene.</p>
+        <form id="plannerForm">
+          <div class="planner-grid">
+            <label class="wide">Startsted
+              <select id="planStart"><option value="">Find et startsted for os</option></select>
+            </label>
+            <label>Tid i alt (min)
+              <input id="planMinutes" type="number" min="15" max="360" step="1" value="90" required inputmode="numeric">
+            </label>
+            <label>Antal stop
+              <input id="planCount" type="number" min="2" max="15" step="1" value="5" required inputmode="numeric">
+            </label>
+            <label>Minutter pr. stop
+              <input id="planDwell" type="number" min="2" max="45" step="1" value="8" required inputmode="numeric">
+            </label>
+            <label>Tema
+              <select id="planTheme"><option value="">Alle temaer</option></select>
+            </label>
+            <label>Maksimal afstand
+              <input id="planDistance" type="number" min="0.1" max="22" step="any" placeholder="Valgfrit" inputmode="decimal">
+            </label>
+            <label>Enhed for afstand
+              <select id="planUnit"><option value="km">Kilometer</option><option value="steps">Skridt</option></select>
+            </label>
+            <label class="wide show-all"><input id="planFree" type="checkbox" checked> Kun gratis stop uden booking</label>
+          </div>
+          <p class="meta">Gangtiden beregnes ved 3,5 km/t, og skridt er anslået ud fra 65 cm pr. skridt. Tiden dækker turen fra første til sidste stop med ophold undervejs.</p>
+          <button id="generateWalk" class="primary" type="submit">Find en rute</button>
+        </form>
+        <p id="planStatus" role="status" class="muted"></p>
+        <section id="planResult" class="planned-route" aria-label="Rutesvar" hidden>
+          <h3 id="planResultTitle"></h3>
+          <div id="planStats"></div>
+          <ol id="planRows" class="numbered-list"></ol>
+          <div class="actions">
+            <button class="primary" id="usePlan" type="button">Brug ruten</button>
+            <button id="viewPlanMap" type="button">Se ruten på kortet</button>
+            <button id="printPlan" type="button">Se feltark</button>
+          </div>
+        </section>
+      </section>
       <section id="walks" hidden>
         <h2>Temaruter</h2>
-        <p class="muted">Tiden dækker gang og korte ophold. Rundvisninger og museumsbesøg kan tage længere tid.</p>
+        <p class="muted">Vælg en TeknologiWalk med et fælles tema. Du kan åbne feltarket direkte eller tage ruten ind i Min rute og ændre den.</p>
         <div id="suggestions"></div>
       </section>
       <section id="route" hidden>
         <h2 id="routeTitle">Min rute</h2>
-        <p id="routeSummary" class="muted"></p>
+        <div id="routeSummary" class="muted"></div>
         <div class="filters">
-          <label>Tid til turen<select id="budget"><option value="45">1 lektion (45 min.)</option><option value="90" selected>2 lektioner (90 min.)</option><option value="120">120 min.</option><option value="150">150 min.</option><option value="180">180 min.</option></select></label>
+          <label>Tid til turen (min)<input id="budget" type="number" min="15" max="360" value="90" inputmode="numeric"></label>
           <label>Minutter pr. stop<input id="dwell" type="number" min="2" max="45" value="8" inputmode="numeric"></label>
         </div>
         <div id="routeRows"></div>
         <div class="actions" id="routeActions" hidden>
           <button class="primary" id="start">Start lydvandring</button>
+          <button id="printRoute">Se feltark</button>
           <button id="copy">Kopiér rutelink</button>
           <button id="fit">Vis hele ruten</button>
           <button id="clear">Tøm rute</button>
@@ -103,5 +150,13 @@
     <p>Ruten gemmes i den browser, I bruger. Rutelinket indeholder stoprækkefølge, klassetrin og tidsramme. Modtagerne skal have adgang til feltkortet.</p>
   </details>
 </main>
+<dialog id="fieldSheet" aria-labelledby="sheetTitle">
+  <div class="sheet-tools">
+    <button type="button" id="closeSheet">Luk feltark</button>
+    <button type="button" id="printSheet" class="primary">Udskriv eller gem som PDF</button>
+    <span id="sheetStatus" role="status"></span>
+  </div>
+  <div id="sheetContent"></div>
+</dialog>
 </body>
 </html>
