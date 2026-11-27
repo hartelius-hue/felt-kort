@@ -32,6 +32,29 @@ function walkStats(points, path, dwell) {
   ];
 }
 
+// Shorten crossings and backtracking while keeping the chosen first stop.
+function improveStopOrder(points) {
+  let bestGain;
+  do {
+    bestGain = .001;
+    let bestStart, bestEnd;
+    for (let first = 1; first < points.length - 1; first++) {
+      for (let last = first + 1; last < points.length; last++) {
+        const before = points[first - 1], start = points[first], end = points[last], after = points[last + 1];
+        const gain = distance(before, start) - distance(before, end)
+          + (after ? distance(end, after) - distance(start, after) : 0);
+        if (gain > bestGain) {
+          bestGain = gain; bestStart = first; bestEnd = last;
+        }
+      }
+    }
+    if (bestStart !== undefined) {
+      const reversed = points.slice(bestStart, bestEnd + 1).reverse();
+      points.splice(bestStart, reversed.length, ...reversed);
+    }
+  } while (bestGain > .001);
+}
+
 function walkingCandidates(points, start, count, maxKm) {
   const near = new Map(points.map(p => [
     p.id,
@@ -54,7 +77,10 @@ function walkingCandidates(points, start, count, maxKm) {
         km += next.km * 1.4;
         stops.push(next.point);
       }
-      if (stops.length !== count || km > maxKm * 1.4 + .001) continue;
+      if (stops.length !== count) continue;
+      improveStopOrder(stops);
+      km = walkNumbers(stops, null, 0).km;
+      if (km > maxKm * 1.4 + .001) continue;
       const key = stops.map(s => s.id).join(',');
       const score = Math.abs(targetKm - km);
       options.set(key, {points: stops, km, score});
